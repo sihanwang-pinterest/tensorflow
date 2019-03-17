@@ -167,6 +167,30 @@ filegroup(
         "@zlib_archive//:zlib.h",
         "@org_python_pypi_backports_weakref//:LICENSE",
     ] + select({
+        "//tensorflow:with_aws_support": [
+            "@aws//:LICENSE",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//tensorflow:with_gcp_support": [
+            "@com_github_googleapis_googleapis//:LICENSE",
+            "@com_github_googlecloudplatform_google_cloud_cpp//:LICENSE",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//tensorflow:with_jemalloc_linux_x86_64": [
+            "@jemalloc//:COPYING",
+        ],
+        "//tensorflow:with_jemalloc_linux_ppc64le": [
+            "@jemalloc//:COPYING",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//tensorflow:with_kafka_support": [
+            "@kafka//:LICENSE",
+        ],
+        "//conditions:default": [],
+    }) + select({
         "//tensorflow/core/kernels:xsmm": [
             "@libxsmm_archive//:LICENSE.md",
         ],
@@ -189,16 +213,7 @@ filegroup(
         "@ngraph_tf//:LICENSE",
         "@nlohmann_json_lib//:LICENSE.MIT",
         "@tbb//:LICENSE",
-    ]) + tf_additional_license_deps() + select({
-        "//tensorflow:linux_s390x": [],
-        "//tensorflow:windows": [],
-        "//conditions:default": [
-            "@aws//:LICENSE",
-            "@com_github_googleapis_googleapis//:LICENSE",
-            "@com_github_googlecloudplatform_google_cloud_cpp//:LICENSE",
-            "@kafka//:LICENSE",
-        ],
-    }),
+    ]) + tf_additional_license_deps(),
 )
 
 sh_binary(
