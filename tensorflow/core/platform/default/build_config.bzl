@@ -630,7 +630,7 @@ def tf_additional_core_deps():
         "//tensorflow:windows": [],
         "//tensorflow:no_gcp_support": [],
         "//conditions:default": [
-            "//tensorflow/core/platform/cloud:gcs_file_system",
+            #"//tensorflow/core/platform/cloud:gcs_file_system",
         ],
     }) + select({
         "//tensorflow:android": [],
@@ -648,7 +648,7 @@ def tf_additional_core_deps():
         "//tensorflow:windows": [],
         "//tensorflow:no_aws_support": [],
         "//conditions:default": [
-            "//tensorflow/core/platform/s3:s3_file_system",
+            #"//tensorflow/core/platform/s3:s3_file_system",
         ],
     })
 
@@ -675,8 +675,8 @@ def tf_additional_cloud_kernel_deps():
         "//tensorflow:windows": [],
         "//tensorflow:no_gcp_support": [],
         "//conditions:default": [
-            "//tensorflow/contrib/cloud/kernels:bigquery_reader_ops",
-            "//tensorflow/contrib/cloud/kernels:gcs_config_ops",
+            #"//tensorflow/contrib/cloud/kernels:bigquery_reader_ops",
+            #"//tensorflow/contrib/cloud/kernels:gcs_config_ops",
         ],
     })
 
