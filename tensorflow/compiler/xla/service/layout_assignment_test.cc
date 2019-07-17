@@ -570,13 +570,10 @@ TEST_F(LayoutAssignmentTest, MakeOperandsTheSame) {
   OperandsMustBeTheSameLayoutAssignment layout_assignment(&computation_layout);
   EXPECT_IS_OK(layout_assignment.Run(m.get()).status());
 
-  EXPECT_EQ(HloOpcode::kCopy, concatenate->operand(0)->opcode());
-  EXPECT_THAT(concatenate->operand(0)->shape().layout().minor_to_major(),
-              ElementsAre(1, 0));
-  EXPECT_THAT(concatenate->operand(1)->shape().layout().minor_to_major(),
-              ElementsAre(1, 0));
-  EXPECT_THAT(concatenate->shape().layout().minor_to_major(),
-              ElementsAre(1, 0));
+  EXPECT_EQ(concatenate->operand(0)->shape().layout().minor_to_major(),
+            concatenate->operand(1)->shape().layout().minor_to_major());
+  EXPECT_EQ(concatenate->shape().layout().minor_to_major(),
+            concatenate->operand(1)->shape().layout().minor_to_major());
 }
 
 // Test layout assignment of a transpose into a bitcast based on its operand.
@@ -894,11 +891,11 @@ TEST_F(LayoutAssignmentTest, AllReduceLayoutMissmatch) {
       param = (f32[2,2]) parameter(0)
       gte = f32[2,2] get-tuple-element(param), index=0
       ar.0 = f32[2,2] all-reduce(gte),
-        all_reduce_id=1, replica_groups={{0}}, to_apply=add,
+        channel_id=1, replica_groups={{0}}, to_apply=add,
         sharding={maximal device=0}
       const = f32[2,2] constant({{0,1},{2,3}})
       ROOT ar.1 = f32[2,2] all-reduce(const),
-        all_reduce_id=1, replica_groups={{0}}, to_apply=add,
+        channel_id=1, replica_groups={{0}}, to_apply=add,
         sharding={maximal device=1}
     })";
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> m,

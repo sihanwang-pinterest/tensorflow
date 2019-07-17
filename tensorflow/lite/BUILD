@@ -1,12 +1,11 @@
-package(
-    default_visibility = ["//visibility:public"],
-)
-
-licenses(["notice"])  # Apache 2.0
-
 load("//tensorflow:tensorflow.bzl", "if_not_windows", "tf_cc_test")
 load("//tensorflow/lite:build_def.bzl", "tflite_cc_shared_object", "tflite_copts")
 load("//tensorflow/lite:special_rules.bzl", "tflite_portable_test_suite")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],  # Apache 2.0
+)
 
 exports_files(glob([
     "testdata/*.bin",
@@ -45,9 +44,17 @@ TFLITE_DEFAULT_COPTS = if_not_windows([
 ])
 
 cc_library(
-    name = "schema_fbs_version",
+    name = "version",
     hdrs = ["version.h"],
     copts = TFLITE_DEFAULT_COPTS,
+    # Note that we only use the header defines from :version_lib.
+    deps = ["//tensorflow/core:version_lib"],
+)
+
+# TODO(b/128420794): Migrate clients to use :version directly.
+alias(
+    name = "schema_fbs_version",
+    actual = ":version",
 )
 
 cc_library(
@@ -63,10 +70,13 @@ cc_library(
     ],
 )
 
-tf_cc_test(
+cc_test(
     name = "arena_planner_test",
     size = "small",
     srcs = ["arena_planner_test.cc"],
+    tags = [
+        "tflite_not_portable_android",
+    ],
     deps = [
         ":arena_planner",
         "//tensorflow/core:tflite_portable_logging",
@@ -134,11 +144,37 @@ cc_library(
     copts = TFLITE_DEFAULT_COPTS,
 )
 
+cc_library(
+    name = "allocation",
+    srcs = [
+        "allocation.cc",
+    ] + select({
+        "//tensorflow:android": [
+            "mmap_allocation.cc",
+        ],
+        "//tensorflow:windows": [
+            "mmap_allocation_disabled.cc",
+        ],
+        "//conditions:default": [
+            "mmap_allocation.cc",
+        ],
+    }),
+    hdrs = [
+        "allocation.h",
+    ],
+    copts = TFLITE_DEFAULT_COPTS,
+    deps = [
+        ":simple_memory_arena",
+        ":string",
+        "//tensorflow/lite/c:c_api_internal",
+        "//tensorflow/lite/core/api",
+    ],
+)
+
 # TODO(ahentz): investigate dependency on gemm_support requiring usage of tf_copts.
 cc_library(
     name = "framework",
     srcs = [
-        "allocation.cc",
         "core/subgraph.cc",
         "graph_info.cc",
         "interpreter.cc",
@@ -146,20 +182,7 @@ cc_library(
         "mutable_op_resolver.cc",
         "optional_debug_tools.cc",
         "stderr_reporter.cc",
-    ] + select({
-        "//tensorflow:android": [
-            "nnapi_delegate.cc",
-            "mmap_allocation.cc",
-        ],
-        "//tensorflow:windows": [
-            "nnapi_delegate_disabled.cc",
-            "mmap_allocation_disabled.cc",
-        ],
-        "//conditions:default": [
-            "nnapi_delegate_disabled.cc",
-            "mmap_allocation.cc",
-        ],
-    }),
+    ],
     hdrs = [
         "allocation.h",
         "context.h",
@@ -170,25 +193,25 @@ cc_library(
         "interpreter.h",
         "model.h",
         "mutable_op_resolver.h",
-        "nnapi_delegate.h",
         "op_resolver.h",
         "optional_debug_tools.h",
         "stderr_reporter.h",
     ],
     copts = tflite_copts() + TFLITE_DEFAULT_COPTS,
     deps = [
+        ":allocation",
         ":arena_planner",
         ":graph_info",
         ":memory_planner",
         ":minimal_logging",
-        ":schema_fbs_version",
         ":simple_memory_arena",
         ":string",
         ":util",
+        ":version",
         "//tensorflow/lite/c:c_api_internal",
         "//tensorflow/lite/core/api",
+        "//tensorflow/lite/delegates/nnapi:nnapi_delegate",
         "//tensorflow/lite/nnapi:nnapi_implementation",
-        "//tensorflow/lite/profiling:profiler",
         "//tensorflow/lite/schema:schema_fbs",
     ] + select({
         ":with_select_tf_ops": [
@@ -238,12 +261,15 @@ cc_test(
     deps = [
         ":framework",
         ":string_util",
+        ":version",
         "//tensorflow/lite/core/api",
         "//tensorflow/lite/kernels:builtin_ops",
         "//tensorflow/lite/kernels:kernel_util",
+        "//tensorflow/lite/kernels/internal:compatibility",
         "//tensorflow/lite/kernels/internal:tensor_utils",
         "//tensorflow/lite/schema:schema_fbs",
         "//tensorflow/lite/testing:util",
+        "//third_party/eigen3",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -391,7 +417,9 @@ cc_library(
         "//tensorflow:android": ["-llog"],
         "//conditions:default": [],
     }),
-    visibility = ["//visibility:private"],
+    visibility = [
+        "//tensorflow/lite:__subpackages__",
+    ],
 )
 
 cc_test(

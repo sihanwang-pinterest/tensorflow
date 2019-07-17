@@ -21,7 +21,7 @@ limitations under the License.
 #include <memory>
 #include <unordered_map>
 
-#include "tensorflow/c/c_api.h"
+#include "tensorflow/c/tf_attrtype.h"
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -101,7 +101,23 @@ class AttrBuilder {
     return *this;
   }
 
-  tensorflow::Fprint128 CacheKey(const string& device);
+  // Retrieves the attribute value.
+  // Note that Get() can involve a linear scan of all attributes with the same
+  // value type in this Node. This is not an issue, because Get is used rarely
+  // and nodes have a small number of attributes.
+  template <class T>
+  Status Get(StringPiece attr_name, T* value) const {
+    // Common attributes are stored in AttrVecs. This Get() template
+    // is specialized for them below. If we end up here, the type must be
+    // among those that we store in the node_def_.
+    if (node_def_ == nullptr) {
+      return errors::NotFound("No attr named'", attr_name,
+                              "' found in AttrBuilder for ", op_name_);
+    }
+    return GetNodeAttr(node_def_, attr_name, value);
+  }
+
+  tensorflow::Fprint128 CacheKey(const StringPiece device);
 
   void FillAttrValueMap(AttrValueMap* m) const { FillAttrValueMap(m, true); }
   const NodeDef& BuildNodeDef();
@@ -110,7 +126,7 @@ class AttrBuilder {
   template <class T>
   using AttrVec = tensorflow::gtl::InlinedVector<std::pair<string, T>, 2>;
 
-  tensorflow::Fprint128 BuildCacheKeyForDevice(const string& device) const;
+  tensorflow::Fprint128 BuildCacheKeyForDevice(const StringPiece device) const;
 
   void MayBeInitializeNodeDef();
   // Fill `m` with the attr-value pairs set via AttrBuilder::Set() so far, as
@@ -156,6 +172,16 @@ AttrBuilder& AttrBuilder::Set(StringPiece attr_name, bool&& value);
 template <>
 AttrBuilder& AttrBuilder::Set(StringPiece attr_name,
                               tensorflow::DataType&& value);
+
+template <>
+Status AttrBuilder::Get(StringPiece attr_name, int* value) const;
+template <>
+Status AttrBuilder::Get(StringPiece attr_name, float* value) const;
+template <>
+Status AttrBuilder::Get(StringPiece attr_name, bool* value) const;
+template <>
+Status AttrBuilder::Get(StringPiece attr_name,
+                        tensorflow::DataType* value) const;
 
 }  // namespace tensorflow
 

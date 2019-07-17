@@ -31,6 +31,7 @@ from tensorflow.python.framework import test_util
 from tensorflow.python.keras import keras_parameterized
 from tensorflow.python.keras import testing_utils
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import resource_variable_ops
@@ -210,6 +211,18 @@ class ModelSubclassingTest(keras_parameterized.TestCase):
     self.assertTrue(test_model.uses_custom_build, 'Model should use user '
                                                   'defined build when called.')
 
+  def test_attribute_conflict_error(self):
+
+    class ModelWithProperty(keras.Model):
+
+      @property
+      def read_only(self):
+        return 1.
+
+    m = ModelWithProperty()
+    with self.assertRaisesRegexp(AttributeError, 'read_only'):
+      m.read_only = 2.
+
   def test_custom_build_with_fit(self):
 
     class DummyModel(keras.Model):
@@ -225,7 +238,11 @@ class ModelSubclassingTest(keras_parameterized.TestCase):
         return self.layer2(self.layer1(inputs))
 
     model = DummyModel()
-    model.compile('sgd', 'mse', run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        'sgd',
+        'mse',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     model.fit(np.ones((10, 10)), np.ones((10, 1)), batch_size=2, epochs=2)
     self.assertLen(model.layers, 2)
     self.assertLen(model.trainable_variables, 4)
@@ -490,10 +507,12 @@ class ModelSubclassingTest(keras_parameterized.TestCase):
     self.assertEqual([m.var, m.not_trainable_var], m.variables)
     self.assertEqual([m.var], m.trainable_variables)
     self.assertEqual([m.not_trainable_var], m.non_trainable_variables)
+    self.assertLen(m.get_weights(), 2)
     m.trainable = False
     self.assertEqual([m.var, m.not_trainable_var], m.variables)
     self.assertEqual([], m.trainable_variables)
     self.assertEqual([m.var, m.not_trainable_var], m.non_trainable_variables)
+    self.assertLen(m.get_weights(), 2)
     m.trainable = True
 
     m(array_ops.ones([1, 1]))
@@ -501,6 +520,7 @@ class ModelSubclassingTest(keras_parameterized.TestCase):
     self.assertEqual([m.dense.kernel, m.dense.bias], m.dense.variables)
     self.assertEqual([m.dense.kernel, m.dense.bias], m.dense.weights)
 
+    self.assertLen(m.get_weights(), 4)
     self.assertEqual([m.dense.kernel, m.dense.bias, m.var, m.not_trainable_var],
                      m.variables)
     self.assertEqual([m.dense.kernel, m.dense.bias, m.var],
@@ -509,11 +529,12 @@ class ModelSubclassingTest(keras_parameterized.TestCase):
 
     m.dense.trainable = False
     self.assertEqual(
-        [m.var, m.dense.kernel, m.dense.bias, m.not_trainable_var],
+        [m.dense.kernel, m.dense.bias, m.var, m.not_trainable_var],
         m.variables)
     self.assertEqual([m.var], m.trainable_variables)
     self.assertEqual([m.dense.kernel, m.dense.bias, m.not_trainable_var],
                      m.non_trainable_variables)
+    self.assertLen(m.get_weights(), 4)
 
   def test_add_weight_in_model(self):
 
@@ -593,7 +614,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
         loss='mse',
         optimizer='rmsprop',
         metrics=['acc', keras.metrics.CategoricalAccuracy()],
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     x = np.ones((num_samples, input_dim))
     y = np.zeros((num_samples, num_classes))
@@ -613,7 +635,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
         loss='mse',
         optimizer='rmsprop',
         metrics=['acc'],
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     x1 = np.ones((num_samples, input_dim))
     x2 = np.ones((num_samples, input_dim))
@@ -633,7 +656,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
       model.compile(
           loss='mse',
           optimizer='rmsprop',
-          run_eagerly=testing_utils.should_run_eagerly())
+          run_eagerly=testing_utils.should_run_eagerly(),
+          run_distributed=testing_utils.should_run_distributed())
 
       x = np.ones((num_samples, input_dim), dtype=np.float32)
       y = np.zeros((num_samples, num_classes), dtype=np.float32)
@@ -666,7 +690,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     model.train_on_batch([x1, x2], [y1, y2])
 
     self.assertEqual(model.built, True)
@@ -699,7 +724,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     y_ref = model.predict(x)
 
     model.train_on_batch(x, y)
@@ -732,7 +758,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     loss = model.train_on_batch(x, y)
     self.assertGreater(loss, 0.1)
 
@@ -753,7 +780,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     model.fit([x1, x2], [y1, y2], epochs=2, batch_size=32, verbose=0)
     model.fit({'input_1': x1, 'input_2': x2},
               {'output_1': y1, 'output_2': y2},
@@ -765,7 +793,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     model.train_on_batch([x1, x2], [y1, y2])
     model.train_on_batch({'input_1': x1, 'input_2': x2},
                          {'output_1': y1, 'output_2': y2})
@@ -786,7 +815,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     model.evaluate([x1, x2], [y1, y2])
     model.test_on_batch([x1, x2], [y1, y2])
 
@@ -797,7 +827,6 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.predict_on_batch([x1, x2])
 
   def test_saving(self):
-
     num_classes = (2, 3)
     num_samples = 100
     input_dim = 50
@@ -811,7 +840,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     model.fit([x1, x2], [y1, y2], epochs=2, batch_size=32, verbose=0)
     y_ref_1, y_ref_2 = model.predict([x1, x2])
 
@@ -850,7 +880,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
         loss='mse',
         optimizer='rmsprop',
         metrics=['acc'],
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     x = np.ones((num_samples, input_dim))
     y = np.zeros((num_samples, num_classes))
@@ -874,7 +905,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
         loss='mse',
         optimizer='rmsprop',
         metrics=['acc'],
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     x = np.ones((num_samples, input_dim))
     y = np.zeros((num_samples, num_classes))
@@ -898,7 +930,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
         loss='mse',
         optimizer='rmsprop',
         metrics=['acc'],
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     x = np.ones((num_samples, input_dim))
     y = np.zeros((num_samples, num_classes))
@@ -933,7 +966,8 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
         loss='mse',
         optimizer='rmsprop',
         metrics=['acc'],
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     x = np.ones((num_samples, input_dim))
     y = np.zeros((num_samples, num_classes))
@@ -972,9 +1006,33 @@ class ModelSubclassCompiledTest(keras_parameterized.TestCase):
     model.compile(
         loss='mse',
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
     loss = model.train_on_batch(x, y)
     self.assertGreater(loss, 0.1)
+
+  def test_no_loss_in_compile(self):
+
+    class InternalLossModel(keras.Model):
+
+      def __init__(self):
+        super(InternalLossModel, self).__init__()
+        self.dense = keras.layers.Dense(1)
+
+      def call(self, inputs):
+        out = self.dense(inputs)
+        self.add_loss(math_ops.reduce_sum(out))
+        return out
+
+    model = InternalLossModel()
+    x = np.ones((10, 10))
+    model.predict(x)
+    model.compile(
+        optimizer='rmsprop',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
+    model.fit(x)
+    model.evaluate(x)
 
 
 class GraphSpecificModelSubclassingTests(test.TestCase):

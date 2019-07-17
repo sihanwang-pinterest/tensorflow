@@ -50,12 +50,11 @@ int main(int argc, char* argv[]) {
   // determined by experimentation.
   const int tensor_arena_size = 10 * 1024;
   uint8_t tensor_arena[tensor_arena_size];
-  tflite::SimpleTensorAllocator tensor_allocator(tensor_arena,
-                                                 tensor_arena_size);
 
   // Build an interpreter to run the model with.
-  tflite::MicroInterpreter interpreter(model, resolver, &tensor_allocator,
-                                       error_reporter);
+  tflite::MicroInterpreter interpreter(model, resolver, tensor_arena,
+                                       tensor_arena_size, error_reporter);
+  interpreter.AllocateTensors();
 
   // Get information about the memory area to use for the model's input.
   TfLiteTensor* model_input = interpreter.input(0);
@@ -104,13 +103,11 @@ int main(int argc, char* argv[]) {
     // kind of prediction, so figure out what the highest scoring category was.
     TfLiteTensor* output = interpreter.output(0);
     uint8_t top_category_score = 0;
-    int top_category_index = 0;
     for (int category_index = 0; category_index < kCategoryCount;
          ++category_index) {
       const uint8_t category_score = output->data.uint8[category_index];
       if (category_score > top_category_score) {
         top_category_score = category_score;
-        top_category_index = category_index;
       }
     }
 

@@ -63,9 +63,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import enum
 
-from tensorflow.python.autograph.core import config
 from tensorflow.python.autograph.pyct import anno
 from tensorflow.python.autograph.pyct import ast_util
 from tensorflow.python.autograph.pyct import cfg
@@ -75,10 +75,8 @@ from tensorflow.python.autograph.pyct import qual_names
 from tensorflow.python.autograph.pyct import templates
 from tensorflow.python.autograph.pyct import transformer
 from tensorflow.python.autograph.pyct.static_analysis import activity
-from tensorflow.python.autograph.pyct.static_analysis import live_values
 from tensorflow.python.autograph.pyct.static_analysis import liveness
 from tensorflow.python.autograph.pyct.static_analysis import reaching_definitions
-from tensorflow.python.autograph.pyct.static_analysis import type_info
 from tensorflow.python.util.tf_export import tf_export
 
 # TODO(mdan): These contexts can be refactored into first class objects.
@@ -90,7 +88,20 @@ from tensorflow.python.util.tf_export import tf_export
 
 @tf_export('autograph.experimental.Feature')
 class Feature(enum.Enum):
-  """Represents conversion options that can be toggled on or off.
+  """This enumeration represents optional conversion options.
+
+  These conversion options are experimental. They are subject to change without
+  notice and offer no guarantees.
+
+  _Example Usage_
+
+  ```python
+  optionals= tf.autograph.experimental.Feature.EQUALITY_OPERATORS
+  @tf.function(experimental_autograph_options=optionals)
+  def f(i):
+    if i == 0:  # EQUALITY_OPERATORS allows the use of == here.
+      tf.print('i is zero')
+  ```
 
   Attributes:
     ALL: Enable all features.
@@ -98,11 +109,10 @@ class Feature(enum.Enum):
     ASSERT_STATEMENTS: Convert Tensor-dependent assert statements to tf.Assert.
     BUILTIN_FUNCTIONS: Convert builtin functions applied to Tensors to
       their TF counterparts.
-    ERROR_REWRITING: Rewrite errors that occur in the generated code to
-      indicate the source code to which the failing code corresponds.
+    EQUALITY_OPERATORS: Whether to convert the comparison operators, like
+      equality. This is soon to be deprecated as support is being added to the
+      Tensor class.
     LISTS: Convert list idioms, like initializers, slices, append, etc.
-    LOGICAL_EXPRESSIONS: Convert data-dependent logical expressions applied to
-      Tensors to their TF counterparts.
     NAME_SCOPES: Insert name scopes that name ops according to context, like the
       function they were defined in.
   """
@@ -112,9 +122,8 @@ class Feature(enum.Enum):
   AUTO_CONTROL_DEPS = 'AUTO_CONTROL_DEPS'
   ASSERT_STATEMENTS = 'ASSERT_STATEMENTS'
   BUILTIN_FUNCTIONS = 'BUILTIN_FUNCTIONS'
-  ERROR_REWRITING = 'ERROR_REWRITING'
+  EQUALITY_OPERATORS = 'EQUALITY_OPERATORS'
   LISTS = 'LISTS'
-  LOGICAL_EXPRESSIONS = 'LOGICAL_EXPRESSIONS'
   NAME_SCOPES = 'NAME_SCOPES'
 
   @classmethod
@@ -128,6 +137,9 @@ class Feature(enum.Enum):
     if not isinstance(exclude, (list, tuple, set)):
       exclude = (exclude,)
     return tuple(set(cls.all()) - set(exclude) - {cls.ALL})
+
+
+STANDARD_OPTIONS = None  # Forward definition.
 
 
 class ConversionOptions(object):
@@ -161,6 +173,20 @@ class ConversionOptions(object):
     optional_features = frozenset(optional_features)
     self.optional_features = optional_features
 
+  def as_tuple(self):
+    return (self.recursive, self.force_conversion,
+            self.internal_convert_user_code, self.optional_features)
+
+  def __hash__(self):
+    return hash(self.as_tuple())
+
+  def __eq__(self, other):
+    assert isinstance(other, ConversionOptions)
+    return self.as_tuple() == other.as_tuple()
+
+  def __str__(self):
+    return 'ConversionOptions[{}]'
+
   def uses(self, feature):
     return (Feature.ALL in self.optional_features or
             feature in self.optional_features)
@@ -178,6 +204,9 @@ class ConversionOptions(object):
     Returns:
       ast.Node
     """
+    if self == STANDARD_OPTIONS:
+      return parser.parse_expression('ag__.STD')
+
     template = """
       ag__.ConversionOptions(
           recursive=recursive_val,
@@ -204,7 +233,15 @@ class ConversionOptions(object):
     return expr_ast[0].value
 
 
-class ProgramContext(object):
+STANDARD_OPTIONS = ConversionOptions(
+    recursive=True,
+    force_conversion=False,
+    internal_convert_user_code=True,
+    optional_features=None)
+
+
+class ProgramContext(
+    collections.namedtuple('ProgramContext', ('options', 'autograph_module'))):
   """ProgramContext keeps track of converting function hierarchies.
 
   This object is mutable, and is updated during conversion. Not thread safe.
@@ -213,24 +250,8 @@ class ProgramContext(object):
     options: ConversionOptions
     autograph_module: Module, a reference to the autograph module. This needs to
       be specified by the caller to avoid circular dependencies.
-    required_imports: str, containing an import statement on each line. These
-      are all the imports necessary for the compiled code to run, in addition to
-      the closures of each entity, which are attached dynamically.
   """
-
-  def __init__(
-      self,
-      options,
-      autograph_module,
-  ):
-    self.options = options
-    self.autograph_module = autograph_module
-
-  @property
-  def required_imports(self):
-    """Returns a block containing all imports required by the converted code."""
-    # TODO(mdan): Check that these don't clobber one another.
-    return '\n'.join(config.COMPILED_IMPORT_STATEMENTS)
+  pass
 
 
 class EntityContext(transformer.Context):
@@ -361,10 +382,6 @@ def standard_analysis(node, context, is_initial=False):
   node = activity.resolve(node, context, None)
   node = reaching_definitions.resolve(node, context, graphs, AnnotatedDef)
   node = liveness.resolve(node, context, graphs)
-  node = live_values.resolve(node, context, config.PYTHON_LITERALS)
-  node = type_info.resolve(node, context)
-  # This second call allows resolving first-order class attributes.
-  node = live_values.resolve(node, context, config.PYTHON_LITERALS)
   if is_initial:
     anno.dup(
         node,

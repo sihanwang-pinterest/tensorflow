@@ -33,6 +33,7 @@ from tensorflow.python.keras import callbacks
 from tensorflow.python.keras import keras_parameterized
 from tensorflow.python.keras import metrics as metrics_module
 from tensorflow.python.keras import testing_utils
+from tensorflow.python.ops import math_ops
 from tensorflow.python.platform import test
 from tensorflow.python.platform import tf_logging as logging
 
@@ -51,12 +52,18 @@ class TestTrainingWithDatasetIterators(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_training_and_eval_methods_on_iterators_single_io(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
     optimizer = 'rmsprop'
     loss = 'mse'
     metrics = ['mae', metrics_module.CategoricalAccuracy()]
-    model.compile(optimizer, loss, metrics=metrics,
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        optimizer,
+        loss,
+        metrics=metrics,
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((10, 3), np.float32)
     targets = np.zeros((10, 4), np.float32)
@@ -112,12 +119,18 @@ class TestTrainingWithDatasetIterators(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_iterators_running_out_of_data(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
     optimizer = 'rmsprop'
     loss = 'mse'
     metrics = ['mae']
-    model.compile(optimizer, loss, metrics=metrics,
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        optimizer,
+        loss,
+        metrics=metrics,
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((10, 3), np.float32)
     targets = np.zeros((10, 4), np.float32)
@@ -147,8 +160,12 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
     optimizer = 'rmsprop'
     loss = 'mse'
     metrics = ['mae']
-    model.compile(optimizer, loss, metrics=metrics,
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        optimizer,
+        loss,
+        metrics=metrics,
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((10, 3), np.float32)
     targets = np.zeros((10, 4), np.float32)
@@ -165,12 +182,18 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_training_and_eval_methods_on_dataset(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
     optimizer = 'rmsprop'
     loss = 'mse'
     metrics = ['mae', metrics_module.CategoricalAccuracy()]
-    model.compile(optimizer, loss, metrics=metrics,
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        optimizer,
+        loss,
+        metrics=metrics,
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((10, 3), np.float32)
     targets = np.zeros((10, 4), np.float32)
@@ -237,10 +260,11 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
                                  'the `steps` argument'):
       model.predict(dataset, verbose=0)
 
-  # TODO(b/123531973): Include tests using dataset_v1.
   @keras_parameterized.run_with_all_model_types(exclude_models='sequential')
-  @keras_parameterized.run_all_keras_modes(always_skip_v1=True)
+  @keras_parameterized.run_all_keras_modes
   def test_training_and_eval_methods_on_multi_input_output_dataset(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     input_a = keras.layers.Input(shape=(3,), name='input_1')
     input_b = keras.layers.Input(shape=(3,), name='input_2')
     dense = keras.layers.Dense(4, name='dense')
@@ -252,7 +276,8 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
     model.compile(
         optimizer='rmsprop',
         loss='mse',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     input_a_np = np.random.random((10, 3)).astype(dtype=np.float32)
     input_b_np = np.random.random((10, 3)).astype(dtype=np.float32)
@@ -300,12 +325,18 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_dataset_with_sample_weights(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
     optimizer = 'rmsprop'
     loss = 'mse'
     metrics = ['mae', metrics_module.CategoricalAccuracy()]
-    model.compile(optimizer, loss, metrics=metrics,
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        optimizer,
+        loss,
+        metrics=metrics,
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((10, 3), np.float32)
     targets = np.zeros((10, 4), np.float32)
@@ -321,13 +352,38 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
 
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
+  def test_dataset_with_sample_weights_correctness(self):
+    x = keras.layers.Input(shape=(1,), name='input')
+    y = keras.layers.Dense(
+        1, kernel_initializer='ones', bias_initializer='zeros', name='dense')(x)
+    model = keras.Model(x, y)
+    optimizer = 'rmsprop'
+    loss = 'mse'
+    model.compile(optimizer, loss)
+    inputs = np.array([[0], [1], [2], [3]], np.float32)
+    targets = np.array([[2], [4], [6], [8]], np.float32)
+    sample_weights = np.array([0.25, 0.5, 0.75, 1], np.float32)
+    ds = dataset_ops.Dataset.from_tensor_slices((inputs, targets,
+                                                 sample_weights)).batch(2)
+    result = model.evaluate(ds, verbose=1)
+    # The per sample loss is multipled by the corresponding sample weight. The
+    # average of these weighted losses is the return value of the `evaluate`
+    # call. For example, in the test above the average weighted loss is
+    # calculated in the following manner:
+    # ((2-0)^2) * 0.25 + ((4-1)^2) * 0.5 + ((6-2)^2 * 0.75) + ((8-3)^2 * 1)
+    #  equals 42.5 / 4 = 10.625
+    self.assertEqual(result, 10.625)
+
+  @keras_parameterized.run_with_all_model_types
+  @keras_parameterized.run_all_keras_modes
   def test_dataset_with_sparse_labels(self):
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
     optimizer = 'rmsprop'
     model.compile(
         optimizer,
         loss='sparse_categorical_crossentropy',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((10, 3), dtype=np.float32)
     targets = np.random.randint(0, 4, size=10, dtype=np.int32)
@@ -339,6 +395,8 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
 
   @keras_parameterized.run_all_keras_modes
   def test_dataset_fit_correctness(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
 
     class SumLayer(keras.layers.Layer):
 
@@ -350,7 +408,10 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
 
     model = keras.Sequential([SumLayer(input_shape=(2,))])
     model.compile(
-        'rmsprop', loss='mae', run_eagerly=testing_utils.should_run_eagerly())
+        'rmsprop',
+        loss='mae',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((40, 2), dtype=np.float32)
     inputs[10:20, :] = 2
@@ -416,9 +477,14 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_finite_dataset_known_cardinality_no_steps_arg(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
-    model.compile('rmsprop', 'mse',
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        'rmsprop',
+        'mse',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((100, 3), dtype=np.float32)
     targets = np.random.randint(0, 4, size=100, dtype=np.int32)
@@ -437,9 +503,14 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_finite_dataset_unknown_cardinality_no_steps_arg(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
-    model.compile('rmsprop', 'mse',
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        'rmsprop',
+        'mse',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((100, 3), dtype=np.float32)
     targets = np.random.randint(0, 4, size=100, dtype=np.int32)
@@ -460,6 +531,8 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes(always_skip_v1=True)
   def test_finite_dataset_unknown_cardinality_no_step_with_train_and_val(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
 
     class CaptureStdout(object):
 
@@ -476,7 +549,10 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
 
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
     model.compile(
-        'rmsprop', 'mse', run_eagerly=testing_utils.should_run_eagerly())
+        'rmsprop',
+        'mse',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((100, 3), dtype=np.float32)
     targets = np.random.randint(0, 4, size=100, dtype=np.int32)
@@ -508,9 +584,14 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_finite_dataset_unknown_cardinality_out_of_data(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     model = testing_utils.get_small_mlp(1, 4, input_dim=3)
-    model.compile('rmsprop', 'mse',
-                  run_eagerly=testing_utils.should_run_eagerly())
+    model.compile(
+        'rmsprop',
+        'mse',
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     inputs = np.zeros((100, 3), dtype=np.float32)
     targets = np.random.randint(0, 4, size=100, dtype=np.int32)
@@ -543,12 +624,27 @@ class TestTrainingWithDataset(keras_parameterized.TestCase):
     out = model.predict(dataset)
     self.assertEqual(out.shape[0], 100)
 
+  @keras_parameterized.run_all_keras_modes
+  def test_with_external_loss(self):
+    inp = keras.Input(shape=(4,), name='inp1')
+    out = keras.layers.Dense(2)(inp)
+    model = keras.Model(inp, out)
+    model.add_loss(math_ops.reduce_mean(out))
+    model.compile('rmsprop')
+    x = np.ones((10, 4))
+
+    # dataset contains only features, no labels.
+    dataset = dataset_ops.Dataset.from_tensor_slices(x).repeat(10).batch(10)
+    model.fit(dataset)
+
 
 class TestMetricsWithDatasetIterators(keras_parameterized.TestCase):
 
   @keras_parameterized.run_with_all_model_types
   @keras_parameterized.run_all_keras_modes
   def test_metrics_correctness_with_iterator(self):
+    if testing_utils.should_run_distributed():
+      self.skipTest('b/137397816')
     layers = [
         keras.layers.Dense(8, activation='relu', input_dim=4,
                            kernel_initializer='ones'),
@@ -561,7 +657,8 @@ class TestMetricsWithDatasetIterators(keras_parameterized.TestCase):
         loss='binary_crossentropy',
         metrics=['accuracy', metrics_module.BinaryAccuracy()],
         optimizer='rmsprop',
-        run_eagerly=testing_utils.should_run_eagerly())
+        run_eagerly=testing_utils.should_run_eagerly(),
+        run_distributed=testing_utils.should_run_distributed())
 
     np.random.seed(123)
     x = np.random.randint(10, size=(100, 4)).astype(np.float32)

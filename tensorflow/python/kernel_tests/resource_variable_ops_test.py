@@ -21,11 +21,13 @@ import copy
 import gc
 import os
 import pickle
+import re
 
 from absl.testing import parameterized
 import numpy as np
 
 from tensorflow.core.framework import tensor_pb2
+from tensorflow.python.eager import backprop
 from tensorflow.python.eager import context
 from tensorflow.python.eager import def_function
 from tensorflow.python.framework import constant_op
@@ -54,6 +56,7 @@ from tensorflow.python.training import training_util
 from tensorflow.python.util import compat
 
 
+@test_util.with_control_flow_v2
 class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
                               parameterized.TestCase):
 
@@ -80,9 +83,8 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
                                                    0,
                                                    dtype=dtypes.int32)).run()
 
+  @test_util.run_gpu_only
   def testGPUInt64(self):
-    if not context.context().num_gpus():
-      return
     with context.eager_mode(), context.device("gpu:0"):
       v = resource_variable_ops.ResourceVariable(1, dtype=dtypes.int64)
       self.assertAllEqual(1, v.numpy())
@@ -260,6 +262,47 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
             handle, [0], constant_op.constant([[2]], dtype=dtypes.int32)))
     read = resource_variable_ops.read_variable_op(handle, dtype=dtypes.int32)
     self.assertEqual(self.evaluate(read), [[3]])
+
+  @test_util.run_in_graph_and_eager_modes
+  def testGradientGatherNd(self):
+    v = resource_variable_ops.ResourceVariable(
+        np.random.uniform(size=[2, 2]), dtype=dtypes.float32)
+
+    with backprop.GradientTape() as tape:
+      l = array_ops.gather_nd(v, [[1, 1]])
+      l = math_ops.reduce_sum(l)
+
+    grads = tape.gradient(l, v)
+    self.evaluate(variables.global_variables_initializer())
+    self.assertAllEqual(self.evaluate(grads), [[0., 0.], [0., 1.]])
+
+  @test_util.run_deprecated_v1
+  def testDefaultGradientDtype(self):
+    v = resource_variable_ops.ResourceVariable(
+        np.random.uniform(size=[2, 2]), dtype=dtypes.float64)
+
+    c = constant_op.constant(1.)
+    identity = array_ops.identity_n([c, v.handle])
+    # TODO(b/137403775): Remove this.
+    custom_gradient.copy_handle_data(v.handle, identity[1])
+
+    g = gradients_impl.gradients(identity[0], [c, v.handle])
+    self.assertEqual(g[1].dtype, dtypes.float64)
+    self.evaluate(variables.global_variables_initializer())
+    self.assertAllEqual(g[1], [[0., 0.], [0., 0.]])
+
+  @test_util.run_in_graph_and_eager_modes
+  def testGradientGatherNdIndexedSlices(self):
+    v = resource_variable_ops.ResourceVariable(
+        np.random.uniform(size=[2, 2]), dtype=dtypes.float32)
+
+    with backprop.GradientTape() as tape:
+      l = array_ops.gather_nd(v, [[1], [1]])
+      l = math_ops.reduce_sum(l)
+
+    grads = tape.gradient(l, v)
+    self.evaluate(variables.global_variables_initializer())
+    self.assertAllEqual(self.evaluate(grads.values), [[1., 1.], [1., 1.]])
 
   @test_util.run_in_graph_and_eager_modes
   def testScatterSub(self):
@@ -455,6 +498,74 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
             handle, [0], constant_op.constant(3, dtype=dtypes.int32)))
     read = resource_variable_ops.read_variable_op(handle, dtype=dtypes.int32)
     self.assertEqual(self.evaluate(read), [[6]])
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterAddVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 1.5], name="add")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_add(ops.IndexedSlices(indices=[1], values=[2.5])))
+    self.assertAllEqual([0.0, 4.0], self.evaluate(v))
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterSubVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 2.5], name="sub")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_sub(ops.IndexedSlices(indices=[1], values=[1.5])))
+    self.assertAllEqual([0.0, 1.0], self.evaluate(v))
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterMaxVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 4.0], name="max1")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_max(ops.IndexedSlices(indices=[1], values=[5.0])))
+    self.assertAllEqual([0.0, 5.0], self.evaluate(v))
+
+    v = resource_variable_ops.ResourceVariable([0.0, 3.5], name="max2")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_max(ops.IndexedSlices(indices=[1], values=[2.0])))
+    self.assertAllEqual([0.0, 3.5], self.evaluate(v))
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterMinVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 4.0], name="min1")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_min(ops.IndexedSlices(indices=[1], values=[5.0])))
+    self.assertAllEqual([0.0, 4.0], self.evaluate(v))
+
+    v = resource_variable_ops.ResourceVariable([0.0, 3.5], name="min2")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_min(ops.IndexedSlices(indices=[1], values=[2.0])))
+    self.assertAllEqual([0.0, 2.0], self.evaluate(v))
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterMulVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 4.0], name="mul")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_mul(ops.IndexedSlices(indices=[1], values=[3.0])))
+    self.assertAllEqual([0.0, 12.0], self.evaluate(v))
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterDivVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 6.0], name="div")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_div(ops.IndexedSlices(indices=[1], values=[2.0])))
+    self.assertAllEqual([0.0, 3.0], self.evaluate(v))
+
+  @test_util.run_in_graph_and_eager_modes
+  def testScatterUpdateVariableMethod(self):
+    v = resource_variable_ops.ResourceVariable([0.0, 6.0], name="update")
+    self.evaluate(variables.global_variables_initializer())
+    self.evaluate(
+        v.scatter_update(ops.IndexedSlices(indices=[1], values=[3.0])))
+    self.assertAllEqual([0.0, 3.0], self.evaluate(v))
 
   @test_util.run_deprecated_v1
   def testScatterUpdateString(self):
@@ -697,6 +808,24 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
     value = self.evaluate(v.sparse_read([0, 3, 1, 2]))
     self.assertAllEqual(init_value[[0, 3, 1, 2], ...], value)
 
+  @test_util.run_in_graph_and_eager_modes
+  def testGatherNd(self):
+    init_value = np.reshape(np.arange(np.power(4, 3)), (4, 4, 4))
+    v = resource_variable_ops.ResourceVariable(
+        constant_op.constant(init_value, dtype=dtypes.int32), name="var3")
+    self.evaluate(variables.global_variables_initializer())
+
+    value_op = v.gather_nd([[0, 0], [1, 2], [3, 3]])
+    self.assertAllEqual([3, 4], value_op.shape)
+    value = self.evaluate(value_op)
+    self.assertAllEqual([[0, 1, 2, 3], [24, 25, 26, 27], [60, 61, 62, 63]],
+                        value)
+
+    value_op = v.gather_nd([[0, 0, 0], [1, 2, 3], [3, 3, 3]])
+    self.assertAllEqual([3], value_op.shape)
+    value = self.evaluate(value_op)
+    self.assertAllEqual([0, 27, 63], value)
+
   @test_util.run_deprecated_v1
   def testToFromProto(self):
     with self.cached_session():
@@ -771,7 +900,7 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
           [assign],
           feed_dict={placeholder: np.zeros(shape=[2, 2], dtype=np.float32)})
 
-  def testAssignDifferentShapesEager(self):
+  def testAssignDifferentShapesEagerNotAllowed(self):
     with context.eager_mode():
       with variable_scope.variable_scope("foo"):
         var = variable_scope.get_variable("x", shape=[1, 1],
@@ -780,6 +909,18 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
                                      "Shapes.*and.*are incompatible"):
           assign = var.assign(np.zeros(shape=[2, 2]))
           self.evaluate(assign)
+
+  @test_util.disable_xla("XLA doesn't allow changing shape at assignment, as "
+                         "dictated by tf2xla/xla_resource.cc:SetTypeAndShape")
+  @test_util.run_in_graph_and_eager_modes
+  def testAssignDifferentShapesAllowed(self):
+    var = resource_variable_ops.ResourceVariable(
+        initial_value=np.zeros(shape=[1, 1]),
+        shape=tensor_shape.TensorShape(None))
+    self.evaluate(variables.global_variables_initializer())
+    self.assertAllEqual(np.zeros(shape=[1, 1]), var.read_value())
+    self.evaluate(var.assign(np.zeros(shape=[2, 2])))
+    self.assertAllEqual(np.zeros(shape=[2, 2]), var.read_value())
 
   @test_util.run_deprecated_v1
   def testDtypeAfterFromProto(self):
@@ -874,7 +1015,7 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
       v = resource_variable_ops.ResourceVariable(initial_value=zero)
       return (i + 1, v.read_value())
 
-    with self.assertRaisesRegexp(ValueError, "inside a control-flow"):
+    with self.assertRaisesRegexp(ValueError, "initializer"):
       control_flow_ops.while_loop(cond, body, [0, 0])
 
   def testVariableEager(self):
@@ -996,6 +1137,18 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
       state_ops.scatter_nd_add(v, indices, updates)
       self.assertAllClose(expected, v.numpy())
 
+  @test_util.run_in_graph_and_eager_modes
+  def testUnreadVariableInsideFunction(self):
+    v = resource_variable_ops.ResourceVariable(1.0)
+
+    @def_function.function
+    def assign():
+      v.assign(1.0)
+
+    graph = assign.get_concrete_function().graph
+    self.assertTrue(all(x.type != "ReadVariableOp"
+                        for x in graph.get_operations()))
+
   def testScatterNdSubStateOps(self):
     with context.eager_mode():
       v = resource_variable_ops.ResourceVariable(
@@ -1025,7 +1178,8 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
   def testAssignIncompatibleShape(self):
     v = resource_variable_ops.ResourceVariable([0, 1, 2, 3])
     self.evaluate(v.initializer)
-    with self.assertRaisesRegexp(Exception, r"hapes must be equal"):
+    pattern = re.compile("shapes must be equal", re.IGNORECASE)
+    with self.assertRaisesRegexp(Exception, pattern):
       self.assertAllEqual(self.evaluate(v.assign_add(1)), [1, 2, 3, 4])
 
   @test_util.run_in_graph_and_eager_modes
@@ -1036,9 +1190,7 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
     with copy_to_graph.as_default():  # Intentionally testing v1 behavior
       copied = resource_variable_ops.copy_to_graph_uninitialized(v)
       self.assertEqual(v.name, copied.name)
-      with self.session(copy_to_graph) as session:
-        with self.assertRaises(errors.InvalidArgumentError):
-          session.run(copied.initializer)
+      self.assertIsNone(copied.initializer)
 
   def create_variant_shape_and_type_data(self):
     variant_shape_and_type_data = (
@@ -1113,7 +1265,8 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
           expected=[[[[8, 9], [9, 8]], [[8, 8], [9, 9]]],
                     [[[9, 9], [8, 8]], [[8, 9], [9, 8]]]]),
 
-      # batch_dims=indices.shape.ndims - 1 (equivalent to tf.batch_gather)
+      # batch_dims=indices.shape.ndims - 1 (equivalent to
+      # tf.compat.v1.batch_gather)
       dict(  # 2D indices (1 batch dim)
           batch_dims=1,
           params=[[10, 11, 12, 13], [20, 21, 22, 23]],
